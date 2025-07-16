@@ -21,11 +21,6 @@ In today's interconnected world, applications often need to access resources or 
 + **Scalability**: Centralizes identity management, making it easier to manage users and their permissions across multiple applications. 
 + **User Experience**: Provides a seamless login experience, often through Single-Sign-On (SSO).
 
-> [!info]
-> Here's a callout block.
-> It supports **Markdown**, 
-> 
-> 
 
 
 
