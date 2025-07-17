@@ -165,5 +165,13 @@ docker container ps
 
 Now let us go to the url [localhost:8443](http://localhost:8443) and see. Finally, I should be able to log in. 
 
+Below is the home page of the admin. 
+
+![Admin Home](./images/admin_home.png)
+
+## Keycloak Realms, Clients and Users
+
+Now that we have a
+
 
 
