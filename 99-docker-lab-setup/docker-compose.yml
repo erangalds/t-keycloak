@@ -1,0 +1,78 @@
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak
+    volumes:
+      # Mount your themes, providers, and certificates directories
+      - ./themes:/opt/keycloak/themes/  # No change, but included for context
+      # Mount a local directory for custom providers (.jar files).
+      - ./providers:/opt/keycloak/providers/  # No change, but included for context
+      - ./certs:/opt/keycloak/certs:ro  # Mount certs directory as read-only
+    command:
+      - start
+      - "--db=postgres"
+      - "--db-url-host=keycloak-postgres"
+      - "--db-url-database=${POSTGRES_DB}"
+      - "--db-username=${POSTGRES_USER}"
+      - "--db-password=${POSTGRES_PASSWORD}"
+      - "--https-key-store-file=/opt/keycloak/certs/keystore.jks"  # Added parameter for HTTPS
+
+    environment:
+      # Keycloak Admin Credentials
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
+      # Database Configuration
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-postgres
+      KC_DB_URL_DATABASE: ${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_DB_SCHEMA: public
+
+      # Set the hostname for production-like behavior
+      KC_HOSTNAME: localhost # No change, but included for context
+
+      # Enable HTTPS and set key store parameters
+      # KC_HTTPS_CERTIFICATE_FILE: /opt/keycloak/certs/keystore.jks  # Removed as it's passed in command
+      # KC_HTTPS_CERTIFICATE_KEY_FILE: /opt/keycloak/certs/keystore.jks  # Removed as it's passed in command
+      KC_HTTPS_PORT: 8443
+      KC_HTTPS_CLIENT_AUTH: none  # Disable client authentication
+      KC_HTTP_ENABLED: false # Disable the HTTP endpoint
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+    ports:
+      - "8443:8443"
+      - "8080:8080" # Keep 8080 open for http redirects and reverse proxies to use
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    networks:
+      - keycloak_net
+    restart: unless-stopped
+
+
+
+  keycloak-postgres:
+    image: postgres:17 # Use a stable and valid postgres version
+    container_name: keycloak-postgres 
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck: # Check if the database is ready to accept connections
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - keycloak_net
+    restart: unless-stopped
+
+networks: 
+  keycloak_net:
+volumes:
+  postgres_data:
