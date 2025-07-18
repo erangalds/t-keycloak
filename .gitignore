@@ -8,7 +8,5 @@
 99-docker-lab-setup/providers/
 99-docker-lab-setup/themes/
 
-git filter-branch --force --index-filter 'git rm -r --cached --ignore-unmatch 99-docker-lab-setup/certs/' --prune-empty --tag-name-filter cat -- --all
-git filter-branch --force --index-filter 'git rm -r --cached --ignore-unmatch 99-docker-lab-setup/providers/' --prune-empty --tag-name-filter cat -- --all
-git filter-branch --force --index-filter 'git rm -r --cached --ignore-unmatch 99-docker-lab-setup/themes/' --prune-empty --tag-name-filter cat -- --all
+
 

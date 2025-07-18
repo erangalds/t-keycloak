@@ -1,0 +1,33 @@
+# Dockerfile.kcadm
+# Start from the same base image as your Keycloak service to ensure compatibility
+FROM quay.io/keycloak/keycloak:latest
+
+# Copy your Keycloak server's public certificate into this image
+# This certificate is what the kcadm.sh client will trust for the server.
+COPY certs/keycloak-cert.pem /tmp/keycloak-cert.pem
+
+# Switch to root temporarily to perform certificate operations
+USER root
+
+# Backup the original cacerts file before modifying (good practice)
+# And then import the certificate into the cacerts trust store
+# The base image sets JAVA_HOME, so we can use it directly to find the trust store.
+# We derive the path dynamically to avoid issues where JAVA_HOME might not be set
+# or where tools like 'which' are not available in the minimal base image.
+RUN \
+    KEYTOOL_BIN=$(readlink -f "$(command -v keytool)") && \
+    JAVA_HOME_PATH=$(dirname "$(dirname "$KEYTOOL_BIN")") && \
+    CACERTS_PATH="$JAVA_HOME_PATH/lib/security/cacerts" && \
+    echo "Importing certificate into: ${CACERTS_PATH}" && \
+    cp "${CACERTS_PATH}" "${CACERTS_PATH}.bak" && \
+    keytool -import -trustcacerts -alias keycloak-server-cert \
+        -file /tmp/keycloak-cert.pem \
+        -keystore "${CACERTS_PATH}" \
+        -storepass changeit -noprompt
+
+# Clean up the temporary certificate file to keep the image lean and secure
+RUN rm /tmp/keycloak-cert.pem
+
+# Switch back to the non-root user that Keycloak CLI tools are typically run as
+# This is usually 'keycloak' for modern Keycloak images.
+USER keycloak
