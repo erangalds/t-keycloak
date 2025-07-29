@@ -1,0 +1,27 @@
+# Use a recent, stable version of Python. The -slim tag provides a smaller image size.
+FROM python:3.12-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the requirements file into the container
+# Assumes requirements.txt is inside a 'flask-app' directory in the build context
+COPY flask-app/requirements.txt .
+
+# Install the dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the Flask application code into the container
+COPY flask-app/. .
+
+# Set environment variables for Flask's development server
+ENV FLASK_APP=app.py
+
+# Enables debug mode and the reloader
+ENV FLASK_DEBUG=1
+
+# Expose the port the app runs on
+EXPOSE 8090
+
+# Command to run the application, listening on all interfaces
+CMD ["flask", "run", "--host=0.0.0.0"]

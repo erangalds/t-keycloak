@@ -59,6 +59,8 @@ echo "--- Moving Certificates to '$CERTS_DIR' ---"
 
 # Move all generated certificate files into the certs directory
 mv server.crt server.key keycloak-cert.pem keystore.jks "$CERTS_DIR/"
+# Move the pem file to the flask-app/certs as well. 
+cp "${CERTS_DIR}/keycloak-cert.pem" "flask-app/certs/"
 
 echo "Moved generated certificates to '$CERTS_DIR/'"
 

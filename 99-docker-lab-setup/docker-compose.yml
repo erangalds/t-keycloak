@@ -65,13 +65,32 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"] # ✅ FIXED TYPO: POSTTRES_DB -> POSTGRES_DB
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - keycloak_net
     restart: unless-stopped
+
+  my-flask-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    container_name: my-flask-app
+    ports:
+      - "8090:8090"
+    env_file: .env
+    volumes:
+      - ./flask-app:/app # Mount the flask app code for live reloading
+      - ./certs:/app/certs:ro # Mount certs for TLS verification
+    networks:
+      - keycloak_net
+    depends_on:
+      - keycloak
+    restart: unless-stopped
+    # Keep the container running for development, so we can exec into it.
+    entrypoint: ["tail", "-f", "/dev/null"]
 
 networks:
   keycloak_net:

@@ -416,6 +416,18 @@ This section describes how to add a new user to a specific realm and set their i
     - **`--new-password "keycloak"`**: Sets the new password to "keycloak". **Note:** For production, "keycloak" is a very weak password and should never be used.
         
     - **`#--temporary`**: This is a commented-out option. If uncommented and used, it would force the user to change this password on their very first login, enhancing security.
+
+- Listing the users in the realm
+
+  ```bash
+  # Full list of users and their details.
+  /opt/keycloak/bin/kcadm.sh get users -r my-app-realm
+  # Listing all users but limited number of fields --fields
+  /opt/keycloak/bin/kcadm.sh get users -r my-app-realm --fields username,email,enabled
+  # Filtering the users with specific values with -q
+  /opt/keycloak/bin/kcadm.sh get users -r my-app-realm --fields username,email,enabled -q username=eranga
+
+  ```
         
 
 ### Creating a Client with Keycloak CLI
@@ -433,8 +445,8 @@ This section outlines how to create a "client" in Keycloak, which typically repr
       -s standardFlowEnabled=true \
       -s directAccessGrantsEnabled=true \
       -s publicClient=false \
-      -s redirectUris='["http://my-flask-app:5000/callback"]' \
-      -s webOrigins='["http://my-flask-app:5000"]'
+      -s redirectUris='["http://my-flask-app:8090/callback"]' \
+      -s webOrigins='["http://my-flask-app:8090"]'
   ```
     
     - **Purpose:** Creates a new client application within `my-app-realm`.
@@ -455,9 +467,9 @@ This section outlines how to create a "client" in Keycloak, which typically repr
         
     - **`-s publicClient=false`**: Designates this client as "confidential," meaning it can securely store a client secret. This is typical for server-side applications.
         
-    - **`-s redirectUris='["http://my-flask-app:5000/callback"]'`**: Defines the exact URIs to which Keycloak can redirect the user's browser after successful authentication. This is a critical security measure. The example uses `http://my-flask-app:5000/callback`, suggesting integration with a Flask web application.
+    - **`-s redirectUris='["http://my-flask-app:8090/callback"]'`**: Defines the exact URIs to which Keycloak can redirect the user's browser after successful authentication. This is a critical security measure. The example uses `http://my-flask-app:8090/callback`, suggesting integration with a Flask web application.
         
-    - **`-s webOrigins='["http://my-flask-app:5000"]'`**: Specifies allowed origins for Cross-Origin Resource Sharing (CORS) requests, often needed for JavaScript applications.
+    - **`-s webOrigins='["http://my-flask-app:8090"]'`**: Specifies allowed origins for Cross-Origin Resource Sharing (CORS) requests, often needed for JavaScript applications.
         
 - **Generating the secret key**
         
@@ -495,5 +507,20 @@ This section outlines how to create a "client" in Keycloak, which typically repr
             
     - **`# vbw3lgpTtuVoq7Dl7VxKxzTzzJ4k3rjo`**: This is a commented-out example of what the raw secret key output might look like. Your actual secret will be different.
         
+- **Listing Clients** 
+
+  ```bash
+  # Listing all clients with their full details
+  /opt/keycloak/bin/kcadm.sh get clients -r my-app-realm
+  # Listing all clients with specific details
+  /opt/keycloak/bin/kcadm.sh get clients -r my-app-realm --fields clientId,enabled
+  # Listing the RedirectURIs and WebOrigins
+  /opt/keycloak/bin/kcadm.sh get clients -r my-app-realm --fields clientId,enabled,redirectUris,webOrigins
+  # Filtering for a specific client
+  /opt/keycloak/bin/kcadm.sh get clients -r my-app-realm --fields clientId,enabled,redirectUris,webOrigins -q clientId=my-web-app
+  ```
 
 
+
+
+ 
