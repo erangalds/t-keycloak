@@ -92,6 +92,24 @@ services:
     # Keep the container running for development, so we can exec into it.
     entrypoint: ["tail", "-f", "/dev/null"]
 
+  my-resource-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    container_name: my-resource-api
+    ports:
+      - "8091:8091"
+    env_file: .env
+    volumes:
+      - ./flask-app:/app
+      - ./certs:/app/certs:ro
+    networks:
+      - keycloak_net
+    depends_on:
+      - keycloak
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]
+
 networks:
   keycloak_net:
 volumes:
