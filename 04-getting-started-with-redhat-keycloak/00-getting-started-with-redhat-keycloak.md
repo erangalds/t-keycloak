@@ -45,53 +45,40 @@ But this is the best possible way to setup a keycloak setup. Because in the abov
 When I looked at how *Keycloak* persist the data, what I found was that it uses a *Postgres* Database to save all the critical information like configurations and settings. The other customizations like, `themes` and `providers` gets saved on the filesystem. Also to keep the self-signed certificates we need another folder. Therefore I need to create another folder named `certs` in the same project root folder. Therefore considering all of these needs let me show you how to setup the proper way to setup the container instance using the `docker-compose.yml` file. 
 
 ```yaml
-
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:latest
     container_name: keycloak
     volumes:
-      # Mount your themes, providers, and certificates directories
-      - ./themes:/opt/keycloak/themes/  # No change, but included for context
-      # Mount a local directory for custom providers (.jar files).
-      - ./providers:/opt/keycloak/providers/  # No change, but included for context
-      - ./certs:/opt/keycloak/certs:ro  # Mount certs directory as read-only
+      - ./themes:/opt/keycloak/themes/
+      - ./providers:/opt/keycloak/providers/
+      - ./certs:/opt/keycloak/certs:ro # Mount certs directory as read-only
     command:
       - start
-      - "--db=postgres"
-      - "--db-url-host=keycloak-postgres"
-      - "--db-url-database=${POSTGRES_DB}"
-      - "--db-username=${POSTGRES_USER}"
-      - "--db-password=${POSTGRES_PASSWORD}"
-      - "--https-key-store-file=/opt/keycloak/certs/keystore.jks"  # Added parameter for HTTPS
-
     environment:
-      # Keycloak Admin Credentials
+      # Admin Credentials
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-
-      # Database Configuration
+      #  Database Configuration
       KC_DB: postgres
       KC_DB_URL_HOST: keycloak-postgres
       KC_DB_URL_DATABASE: ${POSTGRES_DB}
       KC_DB_USERNAME: ${POSTGRES_USER}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KC_DB_SCHEMA: public
-
-      # Set the hostname for production-like behavior
-      KC_HOSTNAME: localhost # No change, but included for context
-
-      # Enable HTTPS and set key store parameters
-      # KC_HTTPS_CERTIFICATE_FILE: /opt/keycloak/certs/keystore.jks  # Removed as it's passed in command
-      # KC_HTTPS_CERTIFICATE_KEY_FILE: /opt/keycloak/certs/keystore.jks  # Removed as it's passed in command
+      # HTTPS / TLS Configuration
       KC_HTTPS_PORT: 8443
-      KC_HTTPS_CLIENT_AUTH: none  # Disable client authentication
-      KC_HTTP_ENABLED: false # Disable the HTTP endpoint
-      KC_HOSTNAME_STRICT: false
-      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_HTTPS_KEY_STORE_FILE: /opt/keycloak/certs/keystore.jks
+      KC_HTTPS_KEY_STORE_PASSWORD: ${CERT_PASS} # ✅ ADDED: Keystore password environment variable
+      KC_HTTPS_CLIENT_AUTH: none
+      #KC_HTTP_ENABLED: false
+      # Host Configurations
+      KC_HOSTNAME: keycloak
+      KC_HOSTNAME_STRICT: "false"
+
     ports:
       - "8443:8443"
-      - "8080:8080" # Keep 8080 open for http redirects and reverse proxies to use
+      - "8080:8080" # Optional: Keep if you need for redirects/debugging, remove if only HTTPS
     depends_on:
       keycloak-postgres:
         condition: service_healthy
@@ -99,18 +86,32 @@ services:
       - keycloak_net
     restart: unless-stopped
 
-
+  kcadm:
+    build:
+      context: .
+      dockerfile: Dockerfile.kcadm
+    # Keep the container running so we can exec into it
+    entrypoint: ["tail", "-f", "/dev/null"]
+    env_file:
+      - .env # This ensures variables are always loaded for docker compose run commands
+    container_name: keycloak_cli
+    volumes:
+      - kcadm_data:/home/keycloak:delegated # Mount to the user's home directory
+      - ./certs:/opt/keycloak/certs:ro # Mount certs to trust the Keycloak server
+    networks:
+      - keycloak_net
+    restart: unless-stopped
 
   keycloak-postgres:
-    image: postgres:17 # Use a stable and valid postgres version
-    container_name: keycloak-postgres 
+    image: postgres:17
+    container_name: keycloak-postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    healthcheck: # Check if the database is ready to accept connections
+    healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
@@ -119,10 +120,48 @@ services:
       - keycloak_net
     restart: unless-stopped
 
-networks: 
+  my-flask-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    container_name: my-flask-app
+    ports:
+      - "8090:8090"
+    env_file: .env
+    volumes:
+      - ./flask-app:/app # Mount the flask app code for live reloading
+      - ./certs:/app/certs:ro # Mount certs for TLS verification
+    networks:
+      - keycloak_net
+    depends_on:
+      - keycloak
+    restart: unless-stopped
+    # Keep the container running for development, so we can exec into it.
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+  my-resource-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.flask
+    container_name: my-resource-api
+    ports:
+      - "8091:8091"
+    env_file: .env
+    volumes:
+      - ./flask-app:/app
+      - ./certs:/app/certs:ro
+    networks:
+      - keycloak_net
+    depends_on:
+      - keycloak
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+networks:
   keycloak_net:
 volumes:
   postgres_data:
+  kcadm_data:
 ```
 
 Here you can see what we sensitive information like, `usernames`, `passwords` I have moved to a `.env` file which is in the same folder. Below is how it looks like. 
@@ -137,35 +176,108 @@ POSTGRES_DB=postgres
 POSTGRES_USER=keycloak
 POSTGRES_PASSWORD=change_me
 ```
-Before starting the things we need to generate self-signed certificates. To enable HTTPS communication on the Keycloak. I was able to get that done using `openssl` utility. 
+Before starting the things we need to generate self-signed certificates. To enable HTTPS communication on the Keycloak. I was able to get that done using `openssl` utility. Then I need to pacakge these into a *Java Keystore (`.jks`) file. I can do that with the help of `keytool` utility. To make it easy I have put those steps into a shell script so it does everything and copies the generated files (certificates) into a folder which gets mapped to the container instance.
+
+Let me show you how that shell script looks. 
 
 ```bash
-openssl req -x509 -out server.crt -keyout server.key \
-  -newkey rsa:2048 -nodes -sha256 \
-  -subj '/CN=localhost' -extensions EXT -config <( \
-   printf "[dn]\nCN=localhost\n[req]\ndistinguished_name = dn\n[EXT]\nsubjectAltName=DNS:localhost\nkeyUsage=digitalSignature\n")
+#!/bin/bash
+
+# Define variables for certificate generation
+KEYCLOAK_HOSTNAME="keycloak"
+CERT_PASS="password" # This password protects the keystores
+
+# Define the target directory for certificates
+CERTS_DIR="certs"
+
+echo "--- Preparing Certificate Directory ---"
+
+# Check if the certs directory exists
+if [ -d "$CERTS_DIR" ]; then
+  echo "Directory '$CERTS_DIR' found. Clearing its contents..."
+  # Delete all contents inside the certs directory, but not the directory itself
+  find "$CERTS_DIR" -mindepth 1 -delete
+else
+  echo "Directory '$CERTS_DIR' not found. Creating it..."
+  mkdir -p "$CERTS_DIR"
+fi
+
+echo "--- Generating a single Key and Certificate for Keycloak ---"
+
+# 1. Generate a private key (server.key) and a self-signed certificate (server.crt).
+# The certificate's CN and SAN must match the hostname used to access Keycloak.
+# Here, we include 'keycloak' (for inter-container), 'localhost' (for host access), and '127.0.0.1'.
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 \
+  -keyout server.key \
+  -out server.crt \
+  -subj "/CN=${KEYCLOAK_HOSTNAME}" \
+  -addext "subjectAltName = DNS:${KEYCLOAK_HOSTNAME},DNS:localhost,IP:127.0.0.1" \
+  -days 365
+
+echo "Generated server.key and server.crt."
+
+# 2. Create keycloak-cert.pem for the kcadm client to trust. This is just a copy of the public certificate.
+cp server.crt keycloak-cert.pem
+echo "Created keycloak-cert.pem for client trust."
+
+echo "--- Packaging Certificate into Java Keystores ---"
+
+# 3. Create a PKCS12 keystore from the server key and certificate generated in step 1.
+# This format is a standard way to bundle a private key with its certificate chain.
+openssl pkcs12 -export -in server.crt -inkey server.key \
+  -out keycloak.p12 -name server -passout pass:"${CERT_PASS}"
+
+echo "Generated keycloak.p12 from server.crt and server.key."
+
+# 4. Convert the PKCS12 keystore to a JKS keystore for Keycloak to use.
+# This ensures the JKS keystore contains the exact same key and certificate from step 1.
+keytool -importkeystore \
+  -srckeystore keycloak.p12 -srcstoretype PKCS12 -srcstorepass "${CERT_PASS}" \
+  -destkeystore keystore.jks -deststoretype JKS -deststorepass "${CERT_PASS}" \
+  -noprompt
+
+echo "Generated keystore.jks from keycloak.p12."
+
+echo "--- Moving Certificates to '$CERTS_DIR' ---"
+
+# Move all generated certificate files into the certs directory
+mv server.crt server.key keycloak-cert.pem keystore.jks "$CERTS_DIR/"
+# Move the pem file to the flask-app/certs as well. 
+cp "${CERTS_DIR}/keycloak-cert.pem" "flask-app/certs/"
+
+echo "Moved generated certificates to '$CERTS_DIR/'"
+
+# Clean up intermediate .p12 file (optional, but good practice for security)
+rm keycloak.p12
+
+echo "--- Certificate Generation and Setup Complete ---"
 ```
-
-Now I need to pacakge these into a *Java Keystore (`.jks`) file. Let me do what with the help of `keytool` utility. 
-
-```bash
-keytool -genkeypair -storepass password -storetype PKCS12 -keyalg RSA -keysize 2048 -dname "CN=localhost" -alias server -ext "SAN:c=DNS:localhost,IP:127.0.0.1" -keystore keycloak.p12
-keytool -importkeystore -srckeystore keycloak.p12 -srcstorepass password -srcstoretype pkcs12 -destkeystore keystore.jks -deststorepass password
-```
-
 
 Right, then let's create the container instances. 
 
 ```bash
+# First let us generate the certificates
+bash generate_certificates.sh
+# Check whether ther certs directory and the fask-app/certs directories got the certificates copied.
+# If yes then let's move to the next step.
 # Creating the docker containers and starting them. 
-docker-compose up -d
+docker compose up -d
 # Validate 
-docker container ps
+docker compose ps
 ```
 
-Now let us go to the url [localhost:8443](http://localhost:8443) and see. 
+There is one more thing we need to do in our host machine. Which is, adding the two host hames to our `/etc/hosts` file, otherwise we don't have proper routing from out host machine (e.g. my host is a mac, so from my mac to the containers instances like keycloak and my-flask-app etc.). 
 
-You might have to accept the risk message shown in the bowser. Thtat message is coming because we are using a self-signed certificate. Finally, I should be able to log in. 
+Add below two lines to the `/etc/hosts` file. That's there in any OS (Windows, Linux etc.)
+
+```bash
+127.0.0.1       keycloak
+127.0.0.1       my-flask-app
+```
+
+Now let us go to the url [keycloak:8443](https://keycloak:8443) and see. 
+
+You might have to accept the risk message shown in the bowser. Thtat message is coming because we are using a self-signed certificate. Finally, I should be able to log in. Key in the `username=admin` and `password=keycloak` to login as `admin` user. 
 
 ![Login Page](./images/keycloak-login.png)
 
@@ -308,6 +420,7 @@ This section focuses on how to create and inspect Keycloak realms using the CLI.
 - **Authenticating into to the Keycloak CLI**
   
   ```bash
+  # Authenticating into the Keycloak CLI.
   /opt/keycloak/bin/kcadm.sh config credentials \
       --server https://keycloak:8443 \
       --realm master \
@@ -330,6 +443,7 @@ This section focuses on how to create and inspect Keycloak realms using the CLI.
 - **Creating the Realm**
            
   ```bash
+  # Create a new realm named my-app-realm
   /opt/keycloak/bin/kcadm.sh create realms -s realm=my-app-realm -s enabled=true
   ```
     
@@ -344,6 +458,7 @@ This section focuses on how to create and inspect Keycloak realms using the CLI.
 - **Listing the Realms**
     
   ```bash
+  # Listing the realms
   /opt/keycloak/bin/kcadm.sh get realms
   ```
     
@@ -352,6 +467,7 @@ This section focuses on how to create and inspect Keycloak realms using the CLI.
 - **Getting only the realm names**
             
   ```bash
+  # Retrieving only the realm names
   /opt/keycloak/bin/kcadm.sh get realms --fields realm
   ```
     
@@ -360,6 +476,7 @@ This section focuses on how to create and inspect Keycloak realms using the CLI.
 - **Getting multiple fields**
             
   ```bash
+  # Retrieving multiple fields (e.g., realm and enabled status)
   /opt/keycloak/bin/kcadm.sh get realms --fields realm,enabled
   /opt/keycloak/bin/kcadm.sh get realms --fields id,realm
   ```
@@ -374,13 +491,14 @@ This section describes how to add a new user to a specific realm and set their i
 - **Creating the user in the my-app-realm**
           
   ```bash
-    /opt/keycloak/bin/kcadm.sh create users \
-        -r my-app-realm \
-        -s username=eranga \
-        -s enabled=true \
-        -s firstName=eranga \
-        -s lastName="de silva" \
-        -s email=eranga@example.com
+  # Creating the user in the my-app-realm - User: eranga
+  /opt/keycloak/bin/kcadm.sh create users \
+      -r my-app-realm \
+      -s username=eranga \
+      -s enabled=true \
+      -s firstName=eranga \
+      -s lastName="de silva" \
+      -s email=eranga@example.com
   ```
     
     - **Purpose:** Creates a new user account within the `my-app-realm`.
@@ -398,11 +516,12 @@ This section describes how to add a new user to a specific realm and set their i
 - **Now Setting the password**
        
   ```bash
-    /opt/keycloak/bin/kcadm.sh set-password \
-        -r my-app-realm \
-        --username eranga \
-        --new-password "keycloak" \
-        #--temporary # Set if you want the user to change it on first login
+  # Setting a password for the user eranga
+  /opt/keycloak/bin/kcadm.sh set-password \
+      -r my-app-realm \
+      --username eranga \
+      --new-password "keycloak" \
+      #--temporary # Set if you want the user to change it on first login
   ```
     
     - **Purpose:** Assigns or changes the password for the `eranga` user.
@@ -437,16 +556,17 @@ This section outlines how to create a "client" in Keycloak, which typically repr
 - **Creating the client in the my-app-realm**
       
   ```bash
+  # Creating a new Client in the my-app-realm - Client: my-web-app
   /opt/keycloak/bin/kcadm.sh create clients \
-      -r my-app-realm \
-      -s clientId=my-web-app \
-      -s enabled=true \
-      -s clientAuthenticatorType=client-secret \
-      -s standardFlowEnabled=true \
-      -s directAccessGrantsEnabled=true \
-      -s publicClient=false \
-      -s redirectUris='["http://my-flask-app:8090/callback"]' \
-      -s webOrigins='["http://my-flask-app:8090"]'
+    -r my-app-realm \
+    -s clientId=my-web-app \
+    -s enabled=true \
+    -s clientAuthenticatorType=client-secret \
+    -s standardFlowEnabled=true \
+    -s directAccessGrantsEnabled=true \
+    -s publicClient=false \
+    -s redirectUris='["http://my-flask-app:8090/callback"]' \
+    -s webOrigins='["http://my-flask-app:8090"]'
   ```
     
     - **Purpose:** Creates a new client application within `my-app-realm`.
@@ -471,9 +591,10 @@ This section outlines how to create a "client" in Keycloak, which typically repr
         
     - **`-s webOrigins='["http://my-flask-app:8090"]'`**: Specifies allowed origins for Cross-Origin Resource Sharing (CORS) requests, often needed for JavaScript applications.
         
-- **Generating the secret key**
+- **Getting the secret key for the Client**
         
   ```bash
+  # Getting the Secret of the Client : my-web-app
   /opt/keycloak/bin/kcadm.sh get clients \
       -r my-app-realm \
       -q clientId=my-web-app \
